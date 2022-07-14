@@ -23,6 +23,8 @@
 #include <string>
 #include <utility>
 
+#include "gen_cpp/segment_v2.pb.h"
+#include "olap/itoken_extractor.h"
 #include "olap/olap_common.h"
 #include "olap/olap_define.h"
 #include "olap/utils.h"
@@ -486,6 +488,9 @@ bool Cond::eval(const segment_v2::BloomFilter* bf) const {
         // IS [NOT] nullptr can only used in to filter IS nullptr predicate.
         return operand_field->is_null() == bf->test_bytes(nullptr, 0);
     }
+    case OP_LIKE: {
+        return bf->contains(*_bf);
+    }
     default:
         break;
     }
@@ -508,6 +513,20 @@ Status CondColumn::add_cond(const TCondition& tcond, const TabletColumn& column)
     }
     _conds.push_back(cond.release());
     return Status::OK();
+}
+
+Status CondColumn::add_like_cond(const TabletColumn& column, const std::string& pattern,
+                                 int32_t bf_size, int32_t gram_size) {
+    std::unique_ptr<Cond> cond(new Cond());
+    cond->op = OP_LIKE;
+    segment_v2::BloomFilter::create(segment_v2::NGRAM_BLOOM_FILTER, &cond->_bf, bf_size);
+    NgramTokenExtractor _token_extractor(gram_size);
+
+    if (_token_extractor.stringLikeToBloomFilter(pattern.data(), pattern.length(), *cond->_bf)) {
+        _conds.push_back(cond.release());
+        return OLAP_SUCCESS;
+    } else
+        return OLAP_REQUEST_FAILED;
 }
 
 bool CondColumn::eval(const RowCursor& row) const {
@@ -613,6 +632,26 @@ Status Conditions::append_condition(const TCondition& tcond) {
     return cond_col->add_cond(tcond, column);
 }
 
+// for ngram bloom filter
+Status Conditions::append_like_condition(const TabletColumn& column, const std::string& pattern,
+                                         int32_t field_index, int32_t bf_size, int32_t gram_size) {
+    CondColumn* cond_col = nullptr;
+    auto it = _like_columns.find(field_index);
+    if (it == _like_columns.end()) {
+        cond_col = new CondColumn(*_schema, field_index);
+        if (OLAP_SUCCESS == cond_col->add_like_cond(column, pattern, bf_size, gram_size))
+            _like_columns[field_index] = cond_col;
+        else
+            delete cond_col;
+
+        return OLAP_SUCCESS;
+    } else {
+        cond_col = it->second;
+    }
+
+    return cond_col->add_like_cond(column, pattern, bf_size, gram_size);
+}
+
 bool Conditions::delete_conditions_eval(const RowCursor& row) const {
     if (_columns.empty()) {
         return false;
@@ -632,6 +671,14 @@ bool Conditions::delete_conditions_eval(const RowCursor& row) const {
 CondColumn* Conditions::get_column(int32_t cid) const {
     auto iter = _columns.find(cid);
     if (iter != _columns.end()) {
+        return iter->second;
+    }
+    return nullptr;
+}
+
+CondColumn* Conditions::get_like_column(int32_t cid) const {
+    auto iter = _like_columns.find(cid);
+    if (iter != _like_columns.end()) {
         return iter->second;
     }
     return nullptr;
