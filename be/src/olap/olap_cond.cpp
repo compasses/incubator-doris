@@ -646,9 +646,6 @@ Status Conditions::append_like_condition(const TabletColumn& column, const std::
 
         return Status::OK();
     } else {
-        cond_col = it->second;
-    }
-
     return cond_col->add_like_cond(column, pattern, bf_size, gram_size);
 }
 
