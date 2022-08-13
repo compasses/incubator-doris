@@ -40,6 +40,10 @@ public class IndexDef {
     public static final Expr DEFAULT_NGRAM_SIZE = new IntLiteral(2);
     public static final Expr DEFAULT_NGRAM_BF_SIZE = new IntLiteral(256);
 
+    private static final int MAX_NGRAM_SIZE = 256;
+    private static final int MAX_NGRAM_BF_SIZE = 65536;
+    private static final int MIN_NGRAM_BF_SIZE = 64;
+
     public IndexDef(String indexName, boolean ifNotExists, List<String> columns,
                     IndexTypeWithArgument indexTypeWithArguments, String comment
     ) {
@@ -78,16 +82,16 @@ public class IndexDef {
     }
 
     public void analyze() throws AnalysisException {
+        if (columns == null || columns.size() != 1) {
+            throw new AnalysisException(indexType + " index can only apply to one column.");
+        }
+        if (Strings.isNullOrEmpty(indexName)) {
+            throw new AnalysisException("index name cannot be blank.");
+        }
+        if (indexName.length() > 64) {
+            throw new AnalysisException("index name too long, the index name length at most is 64.");
+        }
         if (indexType == IndexDef.IndexType.BITMAP) {
-            if (columns == null || columns.size() != 1) {
-                throw new AnalysisException("bitmap index can only apply to a single column.");
-            }
-            if (Strings.isNullOrEmpty(indexName)) {
-                throw new AnalysisException("index name cannot be blank.");
-            }
-            if (indexName.length() > 64) {
-                throw new AnalysisException("index name too long, the index name length at most is 64.");
-            }
             TreeSet<String> distinct = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
             distinct.addAll(columns);
             if (columns.size() != distinct.size()) {
@@ -95,16 +99,6 @@ public class IndexDef {
             }
             if (arguments != null && !arguments.isEmpty()) {
                 throw new AnalysisException("bimap index do not need arguments.");
-            }
-        } else if (indexType == IndexType.NGRAM_BF) {
-            if (columns == null || columns.size() != 1) {
-                throw new AnalysisException("ngram index can only apply to a single column.");
-            }
-            if (Strings.isNullOrEmpty(indexName)) {
-                throw new AnalysisException("index name cannot be blank.");
-            }
-            if (indexName.length() > 64) {
-                throw new AnalysisException("index name too long, the index name length at most is 64.");
             }
         }
     }
@@ -220,7 +214,7 @@ public class IndexDef {
         } else if (indexType == IndexType.NGRAM_BF) {
             String indexColName = column.getName();
             PrimitiveType colType = column.getDataType();
-            if (colType != PrimitiveType.CHAR && colType != PrimitiveType.VARCHAR) {
+            if (!colType.isCharFamily()) {
                 throw new AnalysisException(colType + " is not supported in ngram_bf index. "
                         + "invalid column: " + indexColName);
             } else if ((keysType == KeysType.AGG_KEYS && !column.isKey())) {
@@ -232,13 +226,13 @@ public class IndexDef {
                 throw new AnalysisException("ngram should have ngram size and bloom filter size arguments");
             }
             Expr ngramSize = arguments.get(0);
-            if (!(ngramSize instanceof IntLiteral && ((IntLiteral) ngramSize).getLongValue() < 256
+            if (!(ngramSize instanceof IntLiteral && ((IntLiteral) ngramSize).getLongValue() < MAX_NGRAM_SIZE
                     && ((IntLiteral) ngramSize).getLongValue() >= 1)) {
                 throw new AnalysisException("ngram size should be integer and less than 256");
             }
             Expr bfSize = arguments.get(1);
-            if (!(bfSize instanceof IntLiteral && ((IntLiteral) bfSize).getLongValue() < 65536
-                    && ((IntLiteral) bfSize).getLongValue() >= 64)) {
+            if (!(bfSize instanceof IntLiteral && ((IntLiteral) bfSize).getLongValue() < MAX_NGRAM_BF_SIZE
+                    && ((IntLiteral) bfSize).getLongValue() >= MIN_NGRAM_BF_SIZE)) {
                 throw new AnalysisException("bloom filter size should be integer and between 64 and 65536");
             }
         } else {
