@@ -133,6 +133,9 @@ public:
                 return false;
             }
         }
+        if (that.has_null() && !has_null()) {
+            return false;
+        }
         return true;
     }
 
