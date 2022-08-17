@@ -1797,6 +1797,8 @@ public class InternalDataSource implements DataSourceIf<Database> {
             throw new DdlException(e.getMessage());
         }
 
+        Index.checkConflict(stmt.getIndexes(), bfColumns);
+
         olapTable.setReplicationAllocation(replicaAlloc);
 
         // set in memory
